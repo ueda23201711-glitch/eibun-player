@@ -46,6 +46,15 @@
   .card h2 { margin:0 0 8px; font-size:16px; }
   .card input[type=text] { width:100%; font:inherit; font-size:17px; padding:11px 12px; border-radius:10px; border:1px solid var(--line); background:#0b1013; color:var(--tx); letter-spacing:.04em; }
   .pbtn { margin-top:10px; padding:11px 16px; border-radius:10px; background:var(--acc); color:#04161e; font-weight:700; font-size:16px; }
+  .or { margin:14px 0 6px; color:var(--sub); font-size:14px; }
+  .code-in { text-transform:uppercase; font-family:Menlo,"Courier New",monospace !important; font-size:24px !important; letter-spacing:4px !important; text-align:center; }
+  details { margin-top:14px; } details summary { color:var(--sub); font-size:14px; cursor:pointer; }
+  #scanner { position:fixed; left:0; top:0; right:0; bottom:0; background:#000; z-index:50; }
+  #scanner video { position:absolute; left:0; top:0; width:100%; height:100%; object-fit:cover; }
+  #scanner .frame { position:absolute; left:50%; top:45%; width:240px; height:240px; margin:-120px 0 0 -120px; border:3px solid rgba(255,255,255,.9); border-radius:18px; box-shadow:0 0 0 2000px rgba(0,0,0,.45); }
+  #scanner .scan-ui { position:absolute; left:0; right:0; bottom:0; padding:20px 20px calc(env(safe-area-inset-bottom) + 30px); text-align:center; color:#fff; }
+  #scanner .scan-ui p { margin:0 0 14px; line-height:1.6; }
+  #scanner .scan-ui button { background:#fff; color:#1f2a30; padding:12px 28px; border-radius:10px; font-size:16px; }
   .sbtn { margin:8px 8px 0 0; padding:9px 12px; border-radius:10px; background:#1d262d; font-size:15px; }
 
   /* ---- 再生画面（画面いっぱい） ---- */
@@ -93,10 +102,19 @@
   <div class="wrap">
     <div id="setup" class="card hidden">
       <h2>合言葉を入れてください</h2>
-      <p class="note">英文リーダーと同じ合言葉です（英文リーダーの「⚙」で確かめられます）。英文リーダーで「🎞 手元の動画と字幕で読む」から入れた動画が、ここに並びます。</p>
-      <input id="key-in" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="xxxx-xxxx-…">
-      <button id="key-go" class="pbtn" type="button">はじめる</button>
+      <p class="note">英文リーダーと同じ合言葉を使います。使っている端末の英文リーダーで「⚙ 翻訳の設定」を開き、出ている QR を読み取るか、「ペアリングコードを表示」で出た8文字を入力してください。</p>
+      <div id="scan-only" class="hidden">
+        <button id="scan-go" class="pbtn" type="button">📷 QRコードを読み取る</button>
+        <div class="or">または、ペアリングコード（8文字）を入力：</div>
+      </div>
+      <input id="code-in" class="code-in" type="text" maxlength="9" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" placeholder="XXXX-XXXX">
+      <button id="code-go" class="pbtn" type="button">コードで設定する</button>
       <p id="key-msg" class="note"></p>
+      <details>
+        <summary>合言葉（32文字）を直接入力する</summary>
+        <input id="key-in" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="xxxx-xxxx-xxxx-xxxx-xxxx-xxxx-xxxx-xxxx">
+        <button id="key-go" class="sbtn" type="button">この合言葉を使う</button>
+      </details>
     </div>
     <div id="sets" class="card hidden">
       <h2>設定</h2>
@@ -109,6 +127,13 @@
     <p id="hmsg" class="note"></p>
     <div id="list"></div>
   </div>
+</div>
+
+<!-- QR 読み取り -->
+<div id="scanner" class="hidden">
+  <video id="scan-video" playsinline muted autoplay></video>
+  <div class="frame"></div>
+  <div class="scan-ui"><p id="scan-msg"></p><button id="scan-cancel" type="button">やめる</button></div>
 </div>
 
 <!-- 再生画面 -->
@@ -283,11 +308,97 @@
   on($('b-re'), 'click', loadList);
   on($('b-set'), 'click', function () { var s = $('sets'); s.className = s.className.indexOf('hidden') >= 0 ? 'card' : 'card hidden'; $('key-show').textContent = KEY ? KEY.slice(0, 4) + '-••••-…-' + KEY.slice(-4) : '（なし）'; });
   on($('key-chg'), 'click', function () { $('sets').className = 'card hidden'; $('key-in').value = ''; showSetup(true); });
+  function useKey(k) {
+    KEY = k; lsSet('eibun_key', k); $('key-msg').textContent = ''; $('code-in').value = ''; $('key-in').value = '';
+    try { localStorage.removeItem('eibun_reader'); } catch (e) {}
+    docs = {}; loadList();
+  }
   on($('key-go'), 'click', function () {
     var k = normKey($('key-in').value);
     if (!k) { $('key-msg').textContent = '合言葉は 32 文字です（ハイフンはあってもなくても大丈夫）。'; return; }
-    KEY = k; lsSet('eibun_key', k); $('key-msg').textContent = ''; loadList();
+    useKey(k);
   });
+
+  /* ---- ペアリングコード（英文リーダーの「ペアリングコードを表示」で出た8文字。5分・1回だけ） ---- */
+  function rawGet(path, cb) {
+    var x = new XMLHttpRequest();
+    try { x.open('GET', DB_URL + path + '.json', true); } catch (e) { cb(0); return; }
+    x.timeout = 20000;
+    x.onreadystatechange = function () { if (x.readyState !== 4) return; var d = null; try { d = JSON.parse(x.responseText); } catch (e) {} cb(x.status >= 200 && x.status < 300 ? null : (x.status || 0), d); };
+    try { x.send(); } catch (e) { cb(0); }
+  }
+  function rawDel(path) { try { var x = new XMLHttpRequest(); x.open('DELETE', DB_URL + path + '.json', true); x.send(); } catch (e) {} }
+  function redeemCode() {
+    var code = String($('code-in').value || '').toLowerCase().replace(/[^a-z0-9]/g, ''), m = $('key-msg');
+    if (code.length !== 8) { m.textContent = 'ペアリングコードは8文字です。もう一度確認してください。'; return; }
+    m.textContent = '確認中…';
+    rawGet('/pair/' + code, function (err, data) {
+      var k = data && data.k ? normKey(data.k) : null;
+      if (err !== null || !k) { m.textContent = err === 0 ? '接続できません。ネットワークを確認してください。' : 'コードが見つからないか、期限切れです。英文リーダーでもう一度表示してください。'; return; }
+      rawDel('/pair/' + code);   // 1回使ったら消す（英文リーダーと同じ）
+      useKey(k);
+    });
+  }
+  on($('code-go'), 'click', redeemCode);
+  on($('code-in'), 'keydown', function (e) { if (e.keyCode === 13) redeemCode(); });
+  on($('code-in'), 'input', function () { var c = $('code-in').value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8); $('code-in').value = c.length > 4 ? c.slice(0, 4) + '-' + c.slice(4) : c; });
+
+  /* ---- QR 読み取り（英文リーダーの「⚙ 翻訳の設定」の QR） ---- */
+  var canScan = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  if (canScan) $('scan-only').className = '';
+  var scan = null;
+  function loadJsQR(cb) {
+    if (window.jsQR) { cb(); return; }
+    var sc = document.createElement('script');
+    sc.src = READER_URL + 'vendor/jsQR.js'; sc.onload = function () { cb(); }; sc.onerror = function () { cb(); };
+    document.head.appendChild(sc);
+  }
+  function stopScan() {
+    if (!scan) return;
+    clearTimeout(scan.timer);
+    if (scan.stream) each(scan.stream.getTracks(), function (t) { t.stop(); });
+    $('scan-video').srcObject = null; scan = null; $('scanner').className = 'hidden';
+  }
+  function scanFound(text) {
+    var k = /[#&?]k=/.test(text) || /^[A-Za-z0-9-]{32,40}$/.test(text) ? normKey(text) : null;
+    if (!k) { $('scan-msg').textContent = 'この QR は英文リーダーの合言葉ではありません'; return false; }
+    stopScan(); useKey(k); return true;
+  }
+  function scanLoop() {
+    if (!scan) return;
+    var sv = $('scan-video'), next = function () { if (scan) scan.timer = setTimeout(scanLoop, 200); };
+    if (sv.readyState < 2 || !sv.videoWidth) { next(); return; }
+    if (scan.detector) {
+      scan.detector.detect(sv).then(function (codes) { if (codes && codes.length && scanFound(codes[0].rawValue)) return; next(); },
+        function () { scan.detector = null; loadJsQR(next); });
+      return;
+    }
+    if (window.jsQR) {
+      var w = 480, h = Math.round(sv.videoHeight * 480 / sv.videoWidth), c = scan.canvas || (scan.canvas = document.createElement('canvas'));
+      c.width = w; c.height = h; var x = c.getContext('2d'); x.drawImage(sv, 0, 0, w, h);
+      var r = window.jsQR(x.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: 'dontInvert' });
+      if (r && r.data && scanFound(r.data)) return;
+    }
+    next();
+  }
+  on($('scan-go'), 'click', function () {
+    $('key-msg').textContent = '';
+    $('scan-msg').textContent = 'ほかの端末の英文リーダー「⚙ 翻訳の設定」に表示された QR を枠に合わせてください';
+    $('scanner').className = ''; scan = {};
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false }).then(function (stream) {
+      if (!scan) { each(stream.getTracks(), function (t) { t.stop(); }); return; }
+      scan.stream = stream;
+      var sv = $('scan-video'); sv.srcObject = stream; var p = sv.play(); if (p && p['catch']) p['catch'](function () {});
+      if (window.BarcodeDetector) { try { scan.detector = new window.BarcodeDetector({ formats: ['qr_code'] }); } catch (e) { scan.detector = null; } }
+      if (scan.detector) scanLoop(); else loadJsQR(scanLoop);
+    }, function (e) {
+      stopScan();
+      $('key-msg').textContent = e && e.name === 'NotAllowedError' ? 'カメラの使用が許可されていません。ペアリングコードを使ってください。' : 'カメラを起動できませんでした。ペアリングコードを使ってください。';
+    });
+  });
+  on($('scan-cancel'), 'click', stopScan);
+  // カメラアプリで QR を読んで、このアプリの #k=… が開かれたとき
+  on(window, 'hashchange', function () { var k = normKey(location.hash); if (k) { try { history.replaceState(null, '', location.pathname); } catch (e) {} useKey(k); } });
 
   /* ===================== 再生 ===================== */
   var v = $('vid'), cur = null, curId = '', blobUrl = '', links = [], linkErr = [], srcMode = '';

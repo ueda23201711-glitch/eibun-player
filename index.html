@@ -177,12 +177,17 @@
 </div>
 
 <script>
+/* どのアプリの英文を見るか（英文リーダー／手書きメモの英文リーダー）。build-reader-copy.sh がアプリごとに書き換える */
+var EP_CFG = { key: 'eibun_key', gas: 'eibun_gas', cache: 'eibun_reader', idb: 'eibun-video', jump: 'eibun_jump', reader: 'https://ueda23201711-glitch.github.io/eibun-reader/', inApp: /\/eibun-reader\//, name: '英文リーダー' };
+</script>
+<script>
 (function () {
   'use strict';
+  var C = window.EP_CFG;
   var DB_URL = 'https://kiku990-a838d-default-rtdb.asia-southeast1.firebasedatabase.app';
-  var READER_URL = 'https://ueda23201711-glitch.github.io/eibun-reader/';
+  var READER_URL = C.reader;
   // 英文リーダーの中（/eibun-reader/player.html）で開いているとき：リーダーと同じアプリの中で行き来する（取り込んだ動画・合言葉も共通）
-  var IN_RD = /\/eibun-reader\//.test(location.pathname);
+  var IN_RD = C.inApp.test(location.pathname);
 
   function $(id) { return document.getElementById(id); }
   function on(e, ev, fn) { e.addEventListener(ev, fn, false); }
@@ -209,9 +214,9 @@
     var raw = t.toLowerCase().replace(/[^a-z0-9]/g, '');
     return raw.length === 32 ? raw.replace(/(.{4})(?!$)/g, '$1-') : null;
   }
-  var KEY = lsGet('eibun_key') || '';
-  var hk = /[#&]d=/.test(location.hash) ? null : normKey(location.hash); if (hk) { KEY = hk; lsSet('eibun_key', hk); try { history.replaceState(null, '', location.pathname); } catch (e) {} }
-  var gasUrl = lsGet('eibun_gas') || '';
+  var KEY = lsGet(C.key) || '';
+  var hk = /[#&]d=/.test(location.hash) ? null : normKey(location.hash); if (hk) { KEY = hk; lsSet(C.key, hk); try { history.replaceState(null, '', location.pathname); } catch (e) {} }
+  var gasUrl = lsGet(C.gas) || '';
   var driveKey = lsGet('ep_dkey') || '';   // Google ドライブ API のキー（memos/合言葉/settings/drivekey にも保存）
   var pref = { mode: lsGet('ep_mode') || 'both', size: Number(lsGet('ep_size') || 1), pos: lsGet('ep_pos') || 'auto', rate: Number(lsGet('ep_rate') || 1) };
   function savePref() { lsSet('ep_mode', pref.mode); lsSet('ep_size', String(pref.size)); lsSet('ep_pos', pref.pos); lsSet('ep_rate', String(pref.rate)); }
@@ -259,7 +264,7 @@
     if (idb) { cb(idb); return; }
     if (!window.indexedDB) { cb(null); return; }
     try {
-      var rq = indexedDB.open('eibun-video', 1);
+      var rq = indexedDB.open(C.idb, 1);
       rq.onupgradeneeded = function () { try { rq.result.createObjectStore('v'); } catch (e) {} };
       rq.onsuccess = function () { idb = rq.result; cb(idb); };
       rq.onerror = function () { cb(null); };
@@ -303,7 +308,7 @@
     if (!KEY) { showSetup(true); return; }
     showSetup(false);
     // まず英文リーダーがこの端末に残しているデータで、すぐに並べる（Safari で英文リーダーを使っているとき）
-    var local = null; try { local = JSON.parse(lsGet('eibun_reader') || 'null'); } catch (e) {}
+    var local = null; try { local = JSON.parse(lsGet(C.cache) || 'null'); } catch (e) {}
     if (local) { docs = takeDocs(local); render(); }
     $('hmsg').textContent = '読み込んでいます…';
     api('/reader', function (err, data) {
@@ -312,7 +317,7 @@
       $('hmsg').textContent = '';
       render();
     });
-    api('/settings/gas', function (err, u) { if (!err && typeof u === 'string' && u) { gasUrl = u; lsSet('eibun_gas', u); } });
+    api('/settings/gas', function (err, u) { if (!err && typeof u === 'string' && u) { gasUrl = u; lsSet(C.gas, u); } });
     api('/settings/drivekey', function (err, u) { if (!err && typeof u === 'string') { driveKey = u; lsSet('ep_dkey', u); } });
   }
   function ids() { var a = []; for (var k in docs) a.push(k); a.sort(function (x, y) { return (docs[y].at || 0) - (docs[x].at || 0); }); return a; }
@@ -356,8 +361,8 @@
   });
   on($('key-chg'), 'click', function () { $('sets').className = 'card hidden'; $('key-in').value = ''; showSetup(true); });
   function useKey(k) {
-    KEY = k; lsSet('eibun_key', k); $('key-msg').textContent = ''; $('code-in').value = ''; $('key-in').value = '';
-    try { localStorage.removeItem('eibun_reader'); } catch (e) {}
+    KEY = k; lsSet(C.key, k); $('key-msg').textContent = ''; $('code-in').value = ''; $('key-in').value = '';
+    try { localStorage.removeItem(C.cache); } catch (e) {}
     docs = {}; loadList();
   }
   on($('key-go'), 'click', function () {
@@ -966,10 +971,10 @@
     var tk = window.PinLock && window.PinLock.ticket ? window.PinLock.ticket() : '';
     if (tk) url += '&ok=' + tk;
     if (IN_RD) { location.href = './' + url.slice(url.indexOf('#')); return; }   // 同じアプリの中で、リーダーへ
-    try { localStorage.setItem('eibun_jump', JSON.stringify({ h: url.slice(url.indexOf('#')), t: now() })); } catch (er) {}
+    try { localStorage.setItem(C.jump, JSON.stringify({ h: url.slice(url.indexOf('#')), t: now() })); } catch (er) {}
     window.open(url, '_blank');
   });
-  if (IN_RD) { $('b-home-rd').className = 'hbtn'; on($('b-home-rd'), 'click', function () { location.href = './'; }); }
+  if (IN_RD) { $('b-home-rd').className = 'hbtn'; $('b-home-rd').textContent = '‹ ' + C.name; on($('b-home-rd'), 'click', function () { location.href = './'; }); }
   function parseJump(h) {
     var m = /[#&]d=([A-Za-z0-9_-]+)/.exec(h || ''); if (!m) return null;
     var t = /[#&]t=(\d+(?:\.\d+)?)/.exec(h), ok = /[#&]ok=([0-9]+\.[0-9a-f]+)/.exec(h);

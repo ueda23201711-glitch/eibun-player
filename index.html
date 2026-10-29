@@ -80,6 +80,7 @@
   #msg button.sub { background:#2a363e; color:#fff; }
   #toast { position:absolute; left:50%; transform:translateX(-50%); top:calc(env(safe-area-inset-top) + 64px); background:rgba(20,28,33,.92); color:#fff; border-radius:20px; padding:8px 14px; font-size:14px; z-index:4; white-space:nowrap; pointer-events:none; opacity:0; transition:opacity .25s; }
   #toast.on { opacity:1; }
+  #b-unmute { position:absolute; left:50%; transform:translateX(-50%); top:calc(env(safe-area-inset-top) + 64px); z-index:5; padding:12px 18px; border-radius:24px; background:var(--acc); color:#04161e; font-weight:700; font-size:15px; white-space:nowrap; box-shadow:0 4px 16px rgba(0,0,0,.5); }
 
   #ui { position:absolute; left:0; top:0; right:0; bottom:0; z-index:2; opacity:1; transition:opacity .25s; }
   #ui.off { opacity:0; pointer-events:none; }
@@ -106,7 +107,7 @@
 
 <!-- 一覧 -->
 <div id="home">
-  <div class="hbar"><h1>🎬 字幕プレイヤー</h1><button id="b-re" class="hbtn" type="button">↻</button><button id="b-set" class="hbtn" type="button">⚙</button></div>
+  <div class="hbar"><button id="b-home-rd" class="hbtn hidden" type="button">‹ 英文リーダー</button><h1>🎬 字幕プレイヤー</h1><button id="b-re" class="hbtn" type="button">↻</button><button id="b-set" class="hbtn" type="button">⚙</button></div>
   <div class="wrap">
     <div id="setup" class="card hidden">
       <h2>合言葉を入れてください</h2>
@@ -171,6 +172,7 @@
     </div>
   </div>
   <div id="toast"></div>
+  <button id="b-unmute" class="hidden" type="button">🔇 音を消して再生中 ― タップで音を出す</button>
   <div id="msg" class="hidden"></div>
 </div>
 
@@ -179,6 +181,8 @@
   'use strict';
   var DB_URL = 'https://kiku990-a838d-default-rtdb.asia-southeast1.firebasedatabase.app';
   var READER_URL = 'https://ueda23201711-glitch.github.io/eibun-reader/';
+  // 英文リーダーの中（/eibun-reader/player.html）で開いているとき：リーダーと同じアプリの中で行き来する（取り込んだ動画・合言葉も共通）
+  var IN_RD = /\/eibun-reader\//.test(location.pathname);
 
   function $(id) { return document.getElementById(id); }
   function on(e, ev, fn) { e.addEventListener(ev, fn, false); }
@@ -548,7 +552,9 @@
   var toastT = 0;
   function toast(t) { var e = $('toast'); e.textContent = t; e.className = 'on'; clearTimeout(toastT); toastT = setTimeout(function () { e.className = ''; }, 1800); }
 
-  function openDoc(id, startAt) {
+  var autoStart = false;   // 行き来してきたとき：音を消して、その時間から自動で再生する
+  function openDoc(id, startAt, auto) {
+    autoStart = !!auto; muteOff();
     var d = docs[id]; if (!d) return;
     cur = d; curId = id; capKey = ''; rep = -1; $('b-rep').className = 'ib';
     $('home').className = 'hidden'; $('stage').className = '';
@@ -669,8 +675,11 @@
   function ytLoaded() {
     if (!cur || !cur.yt) return;
     msg(''); P.setRate(pref.rate);
-    if (pendingSeek > 0) { var at = pendingSeek; pendingSeek = 0; try { yt.cueVideoById({ videoId: cur.yt, startSeconds: at }); } catch (e) {} if (!seekQuiet) toast('前回の続き（' + fmt(at) + '）から'); }
+    var at0 = pendingSeek;
+    if (pendingSeek > 0 && !autoStart) { var at = pendingSeek; pendingSeek = 0; try { yt.cueVideoById({ videoId: cur.yt, startSeconds: at }); } catch (e) {} if (!seekQuiet) toast('前回の続き（' + fmt(at) + '）から'); }
     seekQuiet = false;
+    pendingSeek = 0;
+    if (autoStart) { autoStart = false; try { yt.mute(); if (at0 > 0) yt.loadVideoById({ videoId: cur.yt, startSeconds: at0 }); else yt.playVideo(); } catch (e) {} muteOn(); }
     clearInterval(ytPollT);
     ytPollT = setInterval(function () { if (P.kind !== 'yt' || !cur) return; updTime(); if (!P.paused()) { draw(); if (now() - posT > 5000) savePos(); } }, 250);
     layout(); updTime();
@@ -710,6 +719,7 @@
     if (pendingSeek > 0) { try { v.currentTime = pendingSeek; } catch (e) {} if (!seekQuiet) toast('前回の続き（' + fmt(pendingSeek) + '）から'); pendingSeek = 0; }
     seekQuiet = false;
     if (resumePlay) { resumePlay = false; P.play(); }
+    if (autoStart) { autoStart = false; v.muted = true; P.play(); muteOn(); }
     layout(); updTime(); updBtns();
   });
   on(v, 'play', function () { updBtns(); kick(); hideSoon(); });
@@ -726,7 +736,7 @@
     v.removeAttribute('src'); try { v.load(); } catch (e) {}
     if (P.kind === 'yt') ytStop();
     if (blobUrl) { try { URL.revokeObjectURL(blobUrl); } catch (e) {} blobUrl = ''; }
-    cur = null; curId = ''; msg('');
+    cur = null; curId = ''; msg(''); muteOff(); autoStart = false;
     exitFs();
     $('stage').className = 'hidden'; $('home').className = '';
     render();
@@ -933,6 +943,16 @@
   on(document, 'visibilitychange', function () { if (document.hidden) savePos(); });
   on(window, 'pagehide', savePos);
 
+  /* ---- 音を消した自動再生（iPhone は、画面を触らないと音ありで再生を始められない） ---- */
+  function muteOn() { $('b-unmute').className = ''; }
+  function muteOff() { $('b-unmute').className = 'hidden'; }
+  function unmute() {
+    muteOff();
+    if (P.kind === 'yt') { try { if (yt && ytReady) { yt.unMute(); yt.setVolume(100); if (P.paused()) yt.playVideo(); } } catch (e) {} return; }
+    v.muted = false; if (P.paused()) P.play();
+  }
+  on($('b-unmute'), 'click', function (e) { e.stopPropagation(); unmute(); });
+
   /* ---- 英文リーダーとの行き来 ----
      リーダーへ：#src=英文ID.文の番号&t=秒&ok=通行証（My単語帳と同じ形。リーダーはその文を光らせ、動画をその場面に合わせる）
      リーダーから：#d=英文ID&t=秒&ok=通行証。ホーム画面アプリどうしで #… が届かないときのため、置き手紙（ep_jump）も見る */
@@ -940,19 +960,21 @@
   on($('b-rd'), 'click', function (e) {
     e.stopPropagation();
     if (!cur) return;
-    var t = P.t(), k = idxAt(t); if (k < 0) k = 0;
+    var t = P.t(), k = idxAt(t), was = !P.paused(); if (k < 0) k = 0;
     P.pause(); savePos();
-    var url = READER_URL + '#src=' + curId + '.' + k + '&t=' + Math.floor(t);
+    var url = READER_URL + '#src=' + curId + '.' + k + '&t=' + (Math.round(t * 10) / 10) + (was ? '&p=1' : '');
     var tk = window.PinLock && window.PinLock.ticket ? window.PinLock.ticket() : '';
     if (tk) url += '&ok=' + tk;
+    if (IN_RD) { location.href = './' + url.slice(url.indexOf('#')); return; }   // 同じアプリの中で、リーダーへ
     try { localStorage.setItem('eibun_jump', JSON.stringify({ h: url.slice(url.indexOf('#')), t: now() })); } catch (er) {}
     window.open(url, '_blank');
   });
+  if (IN_RD) { $('b-home-rd').className = 'hbtn'; on($('b-home-rd'), 'click', function () { location.href = './'; }); }
   function parseJump(h) {
     var m = /[#&]d=([A-Za-z0-9_-]+)/.exec(h || ''); if (!m) return null;
     var t = /[#&]t=(\d+(?:\.\d+)?)/.exec(h), ok = /[#&]ok=([0-9]+\.[0-9a-f]+)/.exec(h);
     if (ok) { if (window.PinLock && window.PinLock.pass) window.PinLock.pass(ok[1]); else window.__pinPass = ok[1]; }
-    return { id: m[1], t: t ? Number(t[1]) : 0 };
+    return { id: m[1], t: t ? Number(t[1]) : 0, p: /[#&]p=1/.test(h) };
   }
   function readJump() {
     var j = parseJump(location.hash);
@@ -965,9 +987,9 @@
   }
   function doJump(j) {
     if (!j || !KEY) return;
-    if (docs[j.id]) { openDoc(j.id, j.t); return; }
+    if (docs[j.id]) { openDoc(j.id, j.t, j.p); return; }
     api('/reader/' + j.id, function (err, d) {
-      if (!err && d && (d.lv || d.yt) && d.cues && d.cues.length) { docs[j.id] = d; openDoc(j.id, j.t); }
+      if (!err && d && (d.lv || d.yt) && d.cues && d.cues.length) { docs[j.id] = d; openDoc(j.id, j.t, j.p); }
       else toast('この英文には動画がないか、見つかりませんでした');
     });
   }

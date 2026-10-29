@@ -88,6 +88,7 @@
   .ut { position:absolute; left:0; right:0; top:0; display:flex; align-items:center; gap:6px; padding:calc(env(safe-area-inset-top) + 6px) calc(env(safe-area-inset-right) + 8px) 6px calc(env(safe-area-inset-left) + 8px); }
   .ut #ttl { flex:1; min-width:0; font-size:15px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; text-shadow:0 1px 3px #000; }
   .ib { min-width:44px; height:44px; padding:0 10px; border-radius:22px; background:rgba(30,40,46,.72); font-size:16px; display:inline-flex; align-items:center; justify-content:center; white-space:nowrap; }
+  #b-rd { font-size:14px; }
   a.ib { color:inherit; text-decoration:none; font-size:14px; }
   .ib.on { background:var(--acc); color:#04161e; font-weight:700; }
   .um { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); display:flex; align-items:center; gap:26px; }
@@ -154,7 +155,7 @@
   <div id="cap"><div id="capin"></div></div>
   <div id="ui">
     <div class="shade-t"></div><div class="shade-b"></div>
-    <div class="ut"><button id="b-back" class="ib" type="button">‹ 一覧</button><div id="ttl"></div><a id="b-src" class="ib hidden" target="_blank" rel="noopener" title="元の動画を開く">🔗 元の動画</a><button id="b-fs" class="ib hidden" type="button" title="全画面">⛶</button></div>
+    <div class="ut"><button id="b-back" class="ib" type="button">‹ 一覧</button><div id="ttl"></div><button id="b-rd" class="ib" type="button" title="英文リーダーで、この場面の英文を開く">📖 リーダー</button><a id="b-src" class="ib hidden" target="_blank" rel="noopener" title="元の動画を開く">🔗 元の動画</a><button id="b-fs" class="ib hidden" type="button" title="全画面">⛶</button></div>
     <div id="um" class="um"><button id="b-prev" class="ib" type="button" title="前の文">⏮</button><button id="pp" class="ib" type="button" title="再生／一時停止">▶</button><button id="b-next" class="ib" type="button" title="次の文">⏭</button></div>
     <div class="ub">
       <div class="seekrow"><span id="tc">0:00</span><input id="seek" type="range" min="0" max="1000" step="1" value="0"><span id="td">0:00</span><span id="sn"></span></div>
@@ -205,7 +206,7 @@
     return raw.length === 32 ? raw.replace(/(.{4})(?!$)/g, '$1-') : null;
   }
   var KEY = lsGet('eibun_key') || '';
-  var hk = normKey(location.hash); if (hk) { KEY = hk; lsSet('eibun_key', hk); try { history.replaceState(null, '', location.pathname); } catch (e) {} }
+  var hk = /[#&]d=/.test(location.hash) ? null : normKey(location.hash); if (hk) { KEY = hk; lsSet('eibun_key', hk); try { history.replaceState(null, '', location.pathname); } catch (e) {} }
   var gasUrl = lsGet('eibun_gas') || '';
   var driveKey = lsGet('ep_dkey') || '';   // Google ドライブ API のキー（memos/合言葉/settings/drivekey にも保存）
   var pref = { mode: lsGet('ep_mode') || 'both', size: Number(lsGet('ep_size') || 1), pos: lsGet('ep_pos') || 'auto', rate: Number(lsGet('ep_rate') || 1) };
@@ -440,7 +441,7 @@
   });
   on($('scan-cancel'), 'click', stopScan);
   // カメラアプリで QR を読んで、このアプリの #k=… が開かれたとき
-  on(window, 'hashchange', function () { var k = normKey(location.hash); if (k) { try { history.replaceState(null, '', location.pathname); } catch (e) {} useKey(k); } });
+  on(window, 'hashchange', function () { var k = /[#&]d=/.test(location.hash) ? null : normKey(location.hash); if (k) { try { history.replaceState(null, '', location.pathname); } catch (e) {} useKey(k); } });
 
   /* ===================== 再生 ===================== */
   /* P：いま使っている動画（手元の動画 <video> か YouTube）を同じ形で扱う */
@@ -547,7 +548,7 @@
   var toastT = 0;
   function toast(t) { var e = $('toast'); e.textContent = t; e.className = 'on'; clearTimeout(toastT); toastT = setTimeout(function () { e.className = ''; }, 1800); }
 
-  function openDoc(id) {
+  function openDoc(id, startAt) {
     var d = docs[id]; if (!d) return;
     cur = d; curId = id; capKey = ''; rep = -1; $('b-rep').className = 'ib';
     $('home').className = 'hidden'; $('stage').className = '';
@@ -563,6 +564,8 @@
     msg('動画を用意しています…');
     var resumeAt = Number(lsGet('ep_at_' + id) || 0);
     pendingSeek = resumeAt > 5 && resumeAt < (d.cues[d.cues.length - 1][0] + 30) ? resumeAt - 2 : 0;
+    seekQuiet = false; resumePlay = false;
+    if (typeof startAt === 'number' && startAt >= 0) { pendingSeek = startAt; seekQuiet = true; if (startAt > 1) toast('英文リーダーの場面（' + fmt(startAt) + '）から'); }
     if (d.yt) { ytOpen(d.yt); return; }
     srcMode = '';
     idbGet(id, function (blob) {
@@ -666,7 +669,8 @@
   function ytLoaded() {
     if (!cur || !cur.yt) return;
     msg(''); P.setRate(pref.rate);
-    if (pendingSeek > 0) { var at = pendingSeek; pendingSeek = 0; try { yt.cueVideoById({ videoId: cur.yt, startSeconds: at }); } catch (e) {} toast('前回の続き（' + fmt(at) + '）から'); }
+    if (pendingSeek > 0) { var at = pendingSeek; pendingSeek = 0; try { yt.cueVideoById({ videoId: cur.yt, startSeconds: at }); } catch (e) {} if (!seekQuiet) toast('前回の続き（' + fmt(at) + '）から'); }
+    seekQuiet = false;
     clearInterval(ytPollT);
     ytPollT = setInterval(function () { if (P.kind !== 'yt' || !cur) return; updTime(); if (!P.paused()) { draw(); if (now() - posT > 5000) savePos(); } }, 250);
     layout(); updTime();
@@ -929,8 +933,53 @@
   on(document, 'visibilitychange', function () { if (document.hidden) savePos(); });
   on(window, 'pagehide', savePos);
 
+  /* ---- 英文リーダーとの行き来 ----
+     リーダーへ：#src=英文ID.文の番号&t=秒&ok=通行証（My単語帳と同じ形。リーダーはその文を光らせ、動画をその場面に合わせる）
+     リーダーから：#d=英文ID&t=秒&ok=通行証。ホーム画面アプリどうしで #… が届かないときのため、置き手紙（ep_jump）も見る */
+  var RD_JUMP_MAX = 90000;
+  on($('b-rd'), 'click', function (e) {
+    e.stopPropagation();
+    if (!cur) return;
+    var t = P.t(), k = idxAt(t); if (k < 0) k = 0;
+    P.pause(); savePos();
+    var url = READER_URL + '#src=' + curId + '.' + k + '&t=' + Math.floor(t);
+    var tk = window.PinLock && window.PinLock.ticket ? window.PinLock.ticket() : '';
+    if (tk) url += '&ok=' + tk;
+    try { localStorage.setItem('eibun_jump', JSON.stringify({ h: url.slice(url.indexOf('#')), t: now() })); } catch (er) {}
+    window.open(url, '_blank');
+  });
+  function parseJump(h) {
+    var m = /[#&]d=([A-Za-z0-9_-]+)/.exec(h || ''); if (!m) return null;
+    var t = /[#&]t=(\d+(?:\.\d+)?)/.exec(h), ok = /[#&]ok=([0-9]+\.[0-9a-f]+)/.exec(h);
+    if (ok) { if (window.PinLock && window.PinLock.pass) window.PinLock.pass(ok[1]); else window.__pinPass = ok[1]; }
+    return { id: m[1], t: t ? Number(t[1]) : 0 };
+  }
+  function readJump() {
+    var j = parseJump(location.hash);
+    if (j) { try { localStorage.removeItem('ep_jump'); } catch (e) {} try { history.replaceState(null, '', location.pathname); } catch (e) {} return j; }
+    var v = null; try { v = JSON.parse(lsGet('ep_jump') || 'null'); } catch (e) {}
+    if (!v || !v.h) return null;
+    try { localStorage.removeItem('ep_jump'); } catch (e) {}
+    if (Math.abs(now() - Number(v.t || 0)) > RD_JUMP_MAX) return null;
+    return parseJump(String(v.h));
+  }
+  function doJump(j) {
+    if (!j || !KEY) return;
+    if (docs[j.id]) { openDoc(j.id, j.t); return; }
+    api('/reader/' + j.id, function (err, d) {
+      if (!err && d && (d.lv || d.yt) && d.cues && d.cues.length) { docs[j.id] = d; openDoc(j.id, j.t); }
+      else toast('この英文には動画がないか、見つかりませんでした');
+    });
+  }
+  function checkJump() { var j = readJump(); if (j) doJump(j); }
+  on(window, 'hashchange', checkJump);
+  on(document, 'visibilitychange', function () { if (!document.hidden) checkJump(); });
+  on(window, 'pageshow', checkJump);
+  on(window, 'focus', checkJump);
+
   /* ---- はじめ ---- */
   loadList();
+  checkJump();
 })();
 </script>
 <script src="https://ueda23201711-glitch.github.io/eibun-reader/lock.js"></script>

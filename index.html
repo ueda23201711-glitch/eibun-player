@@ -127,6 +127,10 @@
       <h2>設定</h2>
       <p class="note">合言葉：<span id="key-show"></span></p>
       <button id="key-chg" class="sbtn" type="button">合言葉を入れ直す</button>
+      <h2 style="margin-top:18px">ドライブの動画をそのまま再生（APIキー）</h2>
+      <p class="note">Google ドライブ API のキーを入れると、取り込まずにドライブから直接再生できるようになります（ほかの端末にも届きます）。</p>
+      <input id="dk-in" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="AIza…">
+      <button id="dk-go" class="sbtn" type="button">保存する</button> <span id="dk-msg" class="note"></span>
       <span id="pl-slot" data-cls="sbtn"></span>
       <p class="note">ホーム画面に追加すると、Safari のバーが消えて画面いっぱいで見られます（共有ボタン →「ホーム画面に追加」）。</p>
       <p class="note">再生中の操作：画面をタップでボタンの表示／非表示。左右のはしをダブルタップで前の文・次の文、まん中をダブルタップで再生／一時停止。キーボードでは スペース＝再生／一時停止、←→＝前の文・次の文、↑↓＝字幕の大きさ、R＝この文をくり返す。</p>
@@ -202,6 +206,7 @@
   var KEY = lsGet('eibun_key') || '';
   var hk = normKey(location.hash); if (hk) { KEY = hk; lsSet('eibun_key', hk); try { history.replaceState(null, '', location.pathname); } catch (e) {} }
   var gasUrl = lsGet('eibun_gas') || '';
+  var driveKey = lsGet('ep_dkey') || '';   // Google ドライブ API のキー（memos/合言葉/settings/drivekey にも保存）
   var pref = { mode: lsGet('ep_mode') || 'both', size: Number(lsGet('ep_size') || 1), pos: lsGet('ep_pos') || 'auto', rate: Number(lsGet('ep_rate') || 1) };
   function savePref() { lsSet('ep_mode', pref.mode); lsSet('ep_size', String(pref.size)); lsSet('ep_pos', pref.pos); lsSet('ep_rate', String(pref.rate)); }
 
@@ -302,6 +307,7 @@
       render();
     });
     api('/settings/gas', function (err, u) { if (!err && typeof u === 'string' && u) { gasUrl = u; lsSet('eibun_gas', u); } });
+    api('/settings/drivekey', function (err, u) { if (!err && typeof u === 'string') { driveKey = u; lsSet('ep_dkey', u); } });
   }
   function ids() { var a = []; for (var k in docs) a.push(k); a.sort(function (x, y) { return (docs[y].at || 0) - (docs[x].at || 0); }); return a; }
   function render() {
@@ -330,7 +336,18 @@
     });
   }
   on($('b-re'), 'click', loadList);
-  on($('b-set'), 'click', function () { var s = $('sets'); s.className = s.className.indexOf('hidden') >= 0 ? 'card' : 'card hidden'; $('key-show').textContent = KEY ? KEY.slice(0, 4) + '-••••-…-' + KEY.slice(-4) : '（なし）'; });
+  on($('b-set'), 'click', function () { var s = $('sets'); s.className = s.className.indexOf('hidden') >= 0 ? 'card' : 'card hidden'; $('key-show').textContent = KEY ? KEY.slice(0, 4) + '-••••-…-' + KEY.slice(-4) : '（なし）'; $('dk-in').value = driveKey; $('dk-msg').textContent = ''; });
+  on($('dk-go'), 'click', function () {
+    var k = String($('dk-in').value || '').replace(/\s+/g, '');
+    if (k && !/^AIza[0-9A-Za-z_\-]{30,}$/.test(k)) { $('dk-msg').textContent = 'APIキーは「AIza」で始まる文字です。'; return; }
+    driveKey = k; lsSet('ep_dkey', k); $('dk-msg').textContent = '保存しています…';
+    var x = new XMLHttpRequest();
+    try {
+      x.open('PATCH', DB_URL + '/memos/' + KEY + '/settings.json', true); x.setRequestHeader('Content-Type', 'application/json');
+      x.onreadystatechange = function () { if (x.readyState === 4) $('dk-msg').textContent = x.status >= 200 && x.status < 300 ? (k ? '保存しました。' : '消しました。') : 'この端末にだけ保存しました。'; };
+      x.send(JSON.stringify({ drivekey: k || null }));
+    } catch (e) { $('dk-msg').textContent = 'この端末にだけ保存しました。'; }
+  });
   on($('key-chg'), 'click', function () { $('sets').className = 'card hidden'; $('key-in').value = ''; showSetup(true); });
   function useKey(k) {
     KEY = k; lsSet('eibun_key', k); $('key-msg').textContent = ''; $('code-in').value = ''; $('key-in').value = '';
@@ -554,7 +571,11 @@
   function fromDrive(id) {
     var d = docs[id];
     if (!d.lv.drive) { msg('この動画は、まだドライブに送られていません。英文リーダーで動画を入れた端末から送り終えると、ここで見られます。'); return; }
-    if (!gasUrl) { msg('ドライブの動画を見るには、英文リーダーで「翻訳の設定（Apps Script）」が必要です。'); return; }
+    var apiLink = driveKey ? 'https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(d.lv.drive) + '?alt=media&key=' + encodeURIComponent(driveKey) : '';
+    if (!gasUrl) {
+      if (apiLink) { links = []; linkErr = []; srcMode = 'drive'; d.lv.link = apiLink; v.src = apiLink; msg(''); return; }
+      msg('ドライブの動画を見るには、英文リーダーで「翻訳の設定（Apps Script）」が必要です。'); return;
+    }
     msg('☁ ドライブの動画を読み込んでいます…');
     gasCall({ f: 'link', id: d.lv.drive }, function (r, e) {
       if (curId !== id) return;
@@ -562,6 +583,7 @@
       var m = /[?&]id=([^&]+)/.exec(r.url);
       links = m ? ['https://drive.usercontent.google.com/download?id=' + m[1] + '&export=download&confirm=t', r.url] : [r.url];
       if (r.direct && r.direct !== links[0]) links.unshift(r.direct);
+      if (apiLink) links.unshift(apiLink);   // ドライブ API（動画として配信される・iPhone でも再生できる）を先に試す
       linkErr = []; srcMode = 'drive'; d.lv.link = links[0];
       v.src = links.shift(); msg('');
     });

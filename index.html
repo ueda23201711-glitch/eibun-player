@@ -164,6 +164,7 @@
         <button id="b-spd" class="ib" type="button" title="速さ">1.0×</button>
         <button id="b-sm" class="ib" type="button" title="字幕を小さく">A−</button>
         <button id="b-bg" class="ib" type="button" title="字幕を大きく">A＋</button>
+        <button id="b-sw" class="ib hidden" type="button" title="動画の読み込み元（この端末／ドライブ）を切り替える">📱 端末</button>
         <button id="b-pos" class="ib" type="button" title="字幕の位置（自動＝縦画面では動画の下に分ける）">⇕ 自動</button>
       </div>
     </div>
@@ -500,7 +501,8 @@
         imp = null;
         if (curId !== id) return;
         if (blobUrl) { try { URL.revokeObjectURL(blobUrl); } catch (e) {} }
-        blobUrl = URL.createObjectURL(blob); srcMode = 'local'; v.src = blobUrl; msg('');
+        have[id] = 1; lsSet('ep_src_' + id, 'local');
+        blobUrl = URL.createObjectURL(blob); srcMode = 'local'; v.src = blobUrl; msg(''); updBtns();
         toast(okp ? '📱 取り込みました。次からすぐ見られます' : '保存はできませんでした（空き容量）。今は見られます');
       });
     };
@@ -562,18 +564,47 @@
     var resumeAt = Number(lsGet('ep_at_' + id) || 0);
     pendingSeek = resumeAt > 5 && resumeAt < (d.cues[d.cues.length - 1][0] + 30) ? resumeAt - 2 : 0;
     if (d.yt) { ytOpen(d.yt); return; }
+    srcMode = '';
     idbGet(id, function (blob) {
       if (curId !== id) return;
-      if (blob) { if (blobUrl) { try { URL.revokeObjectURL(blobUrl); } catch (e) {} } blobUrl = URL.createObjectURL(blob); srcMode = 'local'; v.src = blobUrl; msg(''); return; }
+      have[id] = blob ? 1 : 0;
+      var wantDrive = lsGet('ep_src_' + id) === 'drive' && d.lv.drive && (driveKey || gasUrl);
+      if (blob && !wantDrive) { playLocal(blob); return; }
       fromDrive(id);
     });
   }
+  function playLocal(blob) {
+    if (blobUrl) { try { URL.revokeObjectURL(blobUrl); } catch (e) {} }
+    blobUrl = URL.createObjectURL(blob); srcMode = 'local'; v.src = blobUrl; msg(''); updBtns();
+  }
+  // 読み込み元の切り替え：📱 この端末 ⇔ ☁ ドライブ（今の位置から続ける。動画ごとに覚える）
+  function switchSrc() {
+    if (!cur || !cur.lv || P.kind !== 'v') return;
+    var id = curId, d = cur, at = P.t(), was = !P.paused();
+    if (srcMode === 'local') {
+      if (!d.lv.drive || !(driveKey || gasUrl)) { toast('ドライブにはこの動画がありません'); return; }
+      lsSet('ep_src_' + id, 'drive'); P.pause();
+      pendingSeek = at; seekQuiet = true; resumePlay = was;
+      fromDrive(id); toast('☁ ドライブから再生します');
+      return;
+    }
+    // ドライブ → この端末（まだなければ取り込む）
+    idbGet(id, function (blob) {
+      if (curId !== id) return;
+      if (blob) { lsSet('ep_src_' + id, 'local'); P.pause(); pendingSeek = at; seekQuiet = true; resumePlay = was; playLocal(blob); toast('📱 この端末の動画で再生します'); return; }
+      var mb = d.lv.size ? '（約 ' + Math.max(1, Math.round(d.lv.size / 1048576)) + 'MB）' : '';
+      if (!window.confirm('この動画' + mb + 'を、この端末に取り込みますか？\n取り込むと、次からは電波がなくてもすぐ見られます。')) return;
+      lsSet('ep_src_' + id, 'local'); pendingSeek = at; seekQuiet = true; resumePlay = false;
+      importDrive(id);
+    });
+  }
+  on($('b-sw'), 'click', function (e) { e.stopPropagation(); switchSrc(); hideSoon(); });
   function fromDrive(id) {
     var d = docs[id];
     if (!d.lv.drive) { msg('この動画は、まだドライブに送られていません。英文リーダーで動画を入れた端末から送り終えると、ここで見られます。'); return; }
     var apiLink = driveKey ? 'https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(d.lv.drive) + '?alt=media&key=' + encodeURIComponent(driveKey) : '';
     if (!gasUrl) {
-      if (apiLink) { links = []; linkErr = []; srcMode = 'drive'; d.lv.link = apiLink; v.src = apiLink; msg(''); return; }
+      if (apiLink) { links = []; linkErr = []; srcMode = 'drive'; d.lv.link = apiLink; v.src = apiLink; msg(''); updBtns(); return; }
       msg('ドライブの動画を見るには、英文リーダーで「翻訳の設定（Apps Script）」が必要です。'); return;
     }
     msg('☁ ドライブの動画を読み込んでいます…');
@@ -585,7 +616,7 @@
       if (r.direct && r.direct !== links[0]) links.unshift(r.direct);
       if (apiLink) links.unshift(apiLink);   // ドライブ API（動画として配信される・iPhone でも再生できる）を先に試す
       linkErr = []; srcMode = 'drive'; d.lv.link = links[0];
-      v.src = links.shift(); msg('');
+      v.src = links.shift(); msg(''); updBtns();
     });
   }
   on(v, 'error', function () {
@@ -669,11 +700,13 @@
   }
   on($('b-src'), 'click', function (e) { e.stopPropagation(); if (cur && cur.yt) { this.href = srcUrl(cur, P.t()); P.pause(); } });
 
-  var pendingSeek = 0;
+  var pendingSeek = 0, seekQuiet = false, resumePlay = false;
   on(v, 'loadedmetadata', function () {
     v.playbackRate = pref.rate;
-    if (pendingSeek > 0) { try { v.currentTime = pendingSeek; } catch (e) {} toast('前回の続き（' + fmt(pendingSeek) + '）から'); pendingSeek = 0; }
-    layout(); updTime();
+    if (pendingSeek > 0) { try { v.currentTime = pendingSeek; } catch (e) {} if (!seekQuiet) toast('前回の続き（' + fmt(pendingSeek) + '）から'); pendingSeek = 0; }
+    seekQuiet = false;
+    if (resumePlay) { resumePlay = false; P.play(); }
+    layout(); updTime(); updBtns();
   });
   on(v, 'play', function () { updBtns(); kick(); hideSoon(); });
   on(v, 'pause', function () { updBtns(); setUi(true); savePos(); });
@@ -801,6 +834,9 @@
     $('b-mode').textContent = MODE_T[pref.mode];
     $('b-spd').textContent = (P.rate() || pref.rate).toFixed(2).replace(/0$/, '') + '×';
     $('b-pos').textContent = pref.pos === 'over' ? '⇕ 重ねる' : '⇕ 自動';
+    var sw = $('b-sw'), canSw = cur && cur.lv && P.kind === 'v' && srcMode && (srcMode === 'drive' || (cur.lv.drive && (driveKey || gasUrl)));
+    sw.className = canSw ? 'ib' : 'ib hidden';
+    if (canSw) sw.textContent = srcMode === 'local' ? '📱 端末' : '☁ ドライブ';
     var fsOk = fsEl() && !fsActive() && !isStandalone();
     $('b-fs').className = fsOk || fsActive() ? 'ib' : 'ib hidden';
     $('b-fs').textContent = fsActive() ? '⤡' : '⛶';

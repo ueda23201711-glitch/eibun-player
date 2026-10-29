@@ -1,0 +1,17 @@
+{
+  "name": "字幕プレイヤー",
+  "short_name": "字幕プレイヤー",
+  "description": "英文リーダーの動画を、画面いっぱいに大きな英語・日本語の字幕で見る",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "lang": "ja",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

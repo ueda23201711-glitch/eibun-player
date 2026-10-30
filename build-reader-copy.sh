@@ -11,7 +11,7 @@ if [ "$2" = "memo" ]; then
   python3 - "$OUT" <<'PY'
 import sys, re
 s = open('index.html', encoding='utf-8').read()
-cfg = "var EP_CFG = { key: 'memo_key', gas: 'memo_gas', cache: 'memo_reader', idb: 'memo-video', jump: 'memo_jump', reader: 'https://ueda23201711-glitch.github.io/tegaki-memo/', inApp: /\\/tegaki-memo\\//, name: '手書きメモ' };"
+cfg = "var EP_CFG = { dkey: 'memo_dkey', key: 'memo_key', gas: 'memo_gas', cache: 'memo_reader', idb: 'memo-video', jump: 'memo_jump', reader: 'https://ueda23201711-glitch.github.io/tegaki-memo/', inApp: /\\/tegaki-memo\\//, name: '手書きメモ' };"
 s, n = re.subn(r"^var EP_CFG = \{.*\};$", lambda m: cfg, s, count=1, flags=re.M); assert n == 1
 s = s.replace('<link rel="manifest" href="app.webmanifest">', '<link rel="manifest" href="manifest.webmanifest">')
 s = s.replace('href="icons/apple-touch-icon-180.png"', 'href="icons/apple-touch-icon-v2-180.png"')

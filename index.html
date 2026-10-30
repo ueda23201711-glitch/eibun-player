@@ -482,11 +482,12 @@ var EP_CFG = { dkey: 'ep_dkey', key: 'eibun_key', gas: 'eibun_gas', cache: 'eibu
   };
   var apiTried = false;
   /* ドライブの動画を中継するサービスワーカー（drive-sw.js）。iPhone の <video> がドライブ API を直接読めないため。
-     字幕プレイヤー単体（/eibun-player/）だけで使う（英文リーダー・手書きメモの中の player.html は、そのアプリの仕組みとぶつからないよう使わない） */
+     字幕プレイヤー単体では drive-sw.js、英文リーダー・手書きメモの中では各アプリの sw.js（drive-sw.js を取り込み済み）を使う */
   var swOk = false;
-  if (!OLD && 'serviceWorker' in navigator && /\/eibun-player\/|^\/(index\.html)?$/.test(location.pathname)) {
+  // 英文リーダー・手書きメモの中（EP_CFG.sw あり）では、そのアプリの sw.js に中継が組み込んであるので、それを登録する（ぶつからない）
+  if (!OLD && 'serviceWorker' in navigator && (EP_CFG.sw || /\/eibun-player\/|^\/(index\.html)?$/.test(location.pathname))) {
     try {
-      navigator.serviceWorker.register('drive-sw.js', { updateViaCache: 'none' }).then(function (reg) { try { reg.update(); } catch (e) {} return navigator.serviceWorker.ready; }).then(function () { swOk = !!navigator.serviceWorker.controller; }, function () {});
+      navigator.serviceWorker.register(EP_CFG.sw || 'drive-sw.js', { updateViaCache: 'none' }).then(function (reg) { try { reg.update(); } catch (e) {} return navigator.serviceWorker.ready; }).then(function () { swOk = !!navigator.serviceWorker.controller; }, function () {});
       navigator.serviceWorker.addEventListener('controllerchange', function () { swOk = true; });
       swOk = !!navigator.serviceWorker.controller;
     } catch (e) {}

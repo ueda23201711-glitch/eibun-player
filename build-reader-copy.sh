@@ -27,4 +27,5 @@ else
 fi
 # ドライブ動画の中継（アプリの sw.js が importScripts で取り込む）。変えたら、そのアプリの sw.js の CACHE の番号も上げること
 cp drive-sw.js "$DIR/drive-sw.js"
+cp gas-worker.js "$DIR/gas-worker.js"   # Apps Script の分割を受け取る裏方（ページが固まらないように）
 echo "wrote $OUT"
